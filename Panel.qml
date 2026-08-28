@@ -24,11 +24,19 @@ Panel {
   property bool brightnessAvailable: false
   property bool brightnessLoading: false
   property string brightnessMonitor: ""
+  property bool brightnessEditing: false
+  property var brightnessDragSnapshot: null
   property string statusMessage: ""
   property bool statusIsError: false
   property string pendingSuccess: ""
   property bool pendingBrightnessReload: false
   property string actionError: ""
+  property var optimisticSnapshot: null
+  property int uiGeneration: 0
+  property bool stateRefreshPending: false
+  property bool brightnessRefreshPending: false
+  property bool scheduleDraftDirty: false
+  property bool retainPanelOpen: false
 
   readonly property string backendPath: Qt.resolvedUrl("bin/display-settings").toString().replace("file://", "")
   readonly property color foreground: bar ? bar.foreground : Color.popups.text
@@ -50,10 +58,81 @@ Panel {
     return Qt.rgba(color.r, color.g, color.b, opacity)
   }
 
+  function open() {
+    controller.show()
+  }
+
+  function close() {
+    retainPanelOpen = false
+    panelRetentionTimer.stop()
+    controller.hide()
+  }
+
+  function toggle() {
+    if (opened) close()
+    else open()
+  }
+
+  function restorePanelAfterAction() {
+    if (!retainPanelOpen) return
+    if (!opened) controller.show()
+    panelRetentionTimer.restart()
+  }
+
   function displayById(id) {
     for (var i = 0; i < displays.length; i++)
       if (displays[i].name === id) return displays[i]
     return null
+  }
+
+  function cloneDisplays(source) {
+    var result = []
+    for (var i = 0; i < source.length; i++) {
+      var copy = {}
+      for (var field in source[i]) {
+        var value = source[i][field]
+        copy[field] = value && typeof value.slice === "function" ? value.slice() : value
+      }
+      result.push(copy)
+    }
+    return result
+  }
+
+  function snapshotUi() {
+    return {
+      displays: cloneDisplays(displays),
+      selectedId: selectedId,
+      nightLightEnabled: nightLightEnabled,
+      scheduleEnabled: scheduleEnabled,
+      scheduleFrom: scheduleFrom,
+      scheduleTo: scheduleTo,
+      scheduleDraftDirty: scheduleDraftDirty,
+      brightnessValue: brightnessValue,
+      brightnessAvailable: brightnessAvailable
+    }
+  }
+
+  function restoreUi(snapshot) {
+    if (!snapshot) return
+    displays = cloneDisplays(snapshot.displays || [])
+    selectedId = snapshot.selectedId || ""
+    nightLightEnabled = !!snapshot.nightLightEnabled
+    scheduleEnabled = !!snapshot.scheduleEnabled
+    scheduleFrom = snapshot.scheduleFrom || "21:00"
+    scheduleTo = snapshot.scheduleTo || "07:00"
+    scheduleDraftDirty = !!snapshot.scheduleDraftDirty
+    brightnessValue = Number(snapshot.brightnessValue)
+    brightnessAvailable = !!snapshot.brightnessAvailable
+  }
+
+  function updateDisplay(name, changes) {
+    var next = cloneDisplays(displays)
+    for (var i = 0; i < next.length; i++) {
+      if (next[i].name !== name) continue
+      for (var field in changes) next[i][field] = changes[field]
+      break
+    }
+    displays = next
   }
 
   function logicalWidth(display) {
@@ -140,27 +219,56 @@ Panel {
   }
 
   function refresh() {
-    if (!stateProc.running && !draggingDisplay) {
-      stateProc.running = true
+    if (actionProc.running || draggingDisplay || brightnessEditing) {
+      stateRefreshPending = true
+      return
     }
+    if (stateProc.running) {
+      stateRefreshPending = true
+      return
+    }
+    stateRefreshPending = false
+    stateProc.requestGeneration = uiGeneration
+    stateProc.output = ""
+    stateProc.running = true
   }
 
   function loadBrightness() {
-    if (!selectedDisplay || brightnessProc.running) return
+    if (!selectedDisplay) return
+    if (actionProc.running || brightnessEditing) {
+      brightnessRefreshPending = true
+      return
+    }
+    if (brightnessProc.running) {
+      brightnessRefreshPending = true
+      return
+    }
+    brightnessRefreshPending = false
     brightnessMonitor = selectedId
-    brightnessAvailable = false
     brightnessLoading = true
+    brightnessProc.requestGeneration = uiGeneration
+    brightnessProc.output = ""
     brightnessProc.command = [backendPath, "brightness", selectedId]
     brightnessProc.running = true
   }
 
-  function runAction(args, successMessage, reloadBrightness) {
-    if (actionProc.running) return
+  function runAction(args, successMessage, reloadBrightness, snapshot) {
+    if (actionProc.running) {
+      if (snapshot) restoreUi(snapshot)
+      return false
+    }
+    retainPanelOpen = opened
+    panelRetentionTimer.stop()
+    optimisticSnapshot = snapshot || snapshotUi()
+    uiGeneration += 1
+    stateRefreshPending = false
+    brightnessRefreshPending = false
     pendingSuccess = successMessage
     pendingBrightnessReload = reloadBrightness === true
     actionError = ""
     actionProc.command = [backendPath].concat(args)
     actionProc.running = true
+    return true
   }
 
   function showStatus(message, error) {
@@ -197,8 +305,9 @@ Panel {
       copy.y = layout[j].y
       optimistic.push(copy)
     }
+    var snapshot = snapshotUi()
     displays = optimistic
-    runAction(["arrange", JSON.stringify(layout)], "Display arrangement saved")
+    runAction(["arrange", JSON.stringify(layout)], "Display arrangement saved", false, snapshot)
   }
 
   Component.onCompleted: refresh()
@@ -207,7 +316,10 @@ Panel {
     brightnessLoading = false
     Qt.callLater(loadBrightness)
   }
-  onOpenedChanged: if (opened) refresh()
+  onOpenedChanged: {
+    if (opened) refresh()
+    else if (retainPanelOpen) Qt.callLater(restorePanelAfterAction)
+  }
 
   Timer {
     interval: 5000
@@ -222,10 +334,30 @@ Panel {
     onTriggered: root.statusMessage = ""
   }
 
+  Timer {
+    id: reconcileTimer
+    // A successful backend exit is authoritative. Reconcile later so a
+    // compositor/output transition cannot flash the previous hardware state.
+    interval: 5000
+    property bool reloadBrightness: false
+    onTriggered: {
+      root.refresh()
+      if (reloadBrightness) Qt.callLater(root.loadBrightness)
+      reloadBrightness = false
+    }
+  }
+
+  Timer {
+    id: panelRetentionTimer
+    interval: 2000
+    onTriggered: root.retainPanelOpen = false
+  }
+
   Process {
     id: stateProc
     command: [root.backendPath, "state"]
     property string output: ""
+    property int requestGeneration: -1
 
     stdout: StdioCollector {
       waitForEnd: true
@@ -236,43 +368,53 @@ Panel {
       waitForEnd: true
     }
     onExited: function(exitCode) {
+      var current = requestGeneration === root.uiGeneration
+        && !actionProc.running && !root.draggingDisplay && !root.brightnessEditing
       if (exitCode !== 0) {
-        root.showStatus(String(stateError.text || "Could not read display settings").trim(), true)
-        return
-      }
-      try {
-        var state = JSON.parse(stateProc.output || "{}")
-        root.displays = state.displays || []
-        root.nightLightEnabled = !!(state.nightLight && state.nightLight.enabled)
-        root.scheduleEnabled = !!(state.nightLight && state.nightLight.schedule && state.nightLight.schedule.enabled)
-        if (state.nightLight && state.nightLight.schedule) {
-          root.scheduleFrom = state.nightLight.schedule.from || "21:00"
-          root.scheduleTo = state.nightLight.schedule.to || "07:00"
+        if (current) root.showStatus(String(stateError.text || "Could not read display settings").trim(), true)
+      } else if (current) {
+        try {
+          var state = JSON.parse(stateProc.output || "{}")
+          root.displays = state.displays || []
+          root.nightLightEnabled = !!(state.nightLight && state.nightLight.enabled)
+          root.scheduleEnabled = !!(state.nightLight && state.nightLight.schedule && state.nightLight.schedule.enabled)
+          if (state.nightLight && state.nightLight.schedule
+              && (root.scheduleEnabled || !root.scheduleDraftDirty)) {
+            root.scheduleFrom = state.nightLight.schedule.from || "21:00"
+            root.scheduleTo = state.nightLight.schedule.to || "07:00"
+            root.scheduleDraftDirty = false
+          }
+          if (!root.displayById(root.selectedId)) {
+            root.selectedId = ""
+            for (var i = 0; i < root.displays.length; i++)
+              if (root.displays[i].focused) root.selectedId = root.displays[i].name
+            if (root.selectedId === "" && root.displays.length > 0) root.selectedId = root.displays[0].name
+          }
+          root.stateLoaded = true
+          Qt.callLater(root.loadBrightness)
+        } catch (error) {
+          root.showStatus("Display state was not valid JSON", true)
         }
-        if (!root.displayById(root.selectedId)) {
-          root.selectedId = ""
-          for (var i = 0; i < root.displays.length; i++)
-            if (root.displays[i].focused) root.selectedId = root.displays[i].name
-          if (root.selectedId === "" && root.displays.length > 0) root.selectedId = root.displays[0].name
-        }
-        root.stateLoaded = true
-        Qt.callLater(root.loadBrightness)
-      } catch (error) {
-        root.showStatus("Display state was not valid JSON", true)
       }
+      if (root.stateRefreshPending && !actionProc.running
+          && !root.draggingDisplay && !root.brightnessEditing) Qt.callLater(root.refresh)
     }
   }
 
   Process {
     id: brightnessProc
     property string output: ""
+    property int requestGeneration: -1
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: brightnessProc.output = String(text || "")
     }
     onExited: function(exitCode) {
       root.brightnessLoading = false
-      if (exitCode === 0 && root.selectedId === root.brightnessMonitor) {
+      var current = requestGeneration === root.uiGeneration
+        && !actionProc.running && !root.brightnessEditing
+        && root.selectedId === root.brightnessMonitor
+      if (exitCode === 0 && current) {
         try {
           var result = JSON.parse(brightnessProc.output || "{}")
           root.brightnessAvailable = !!result.available
@@ -281,7 +423,8 @@ Panel {
           root.brightnessAvailable = false
         }
       }
-      if (root.selectedId !== root.brightnessMonitor) Qt.callLater(root.loadBrightness)
+      if ((root.brightnessRefreshPending || root.selectedId !== root.brightnessMonitor)
+          && !actionProc.running && !root.brightnessEditing) Qt.callLater(root.loadBrightness)
     }
   }
 
@@ -293,14 +436,22 @@ Panel {
     }
     onExited: function(exitCode) {
       if (exitCode === 0) {
+        root.optimisticSnapshot = null
         root.showStatus(root.pendingSuccess, false)
-        root.refresh()
-        if (root.pendingBrightnessReload) Qt.callLater(root.loadBrightness)
+        root.stateRefreshPending = false
+        root.brightnessRefreshPending = false
+        reconcileTimer.reloadBrightness = root.pendingBrightnessReload
+        reconcileTimer.restart()
       } else {
+        root.uiGeneration += 1
+        root.restoreUi(root.optimisticSnapshot)
+        root.optimisticSnapshot = null
+        root.stateRefreshPending = false
+        root.brightnessRefreshPending = false
         root.showStatus(root.actionError || "The display change failed", true)
-        root.refresh()
       }
       root.pendingBrightnessReload = false
+      Qt.callLater(root.restorePanelAfterAction)
     }
   }
 
@@ -630,17 +781,29 @@ Panel {
                 spacing: Style.space(10)
                 opacity: root.brightnessAvailable ? 1 : 0.38
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "☼"; color: root.muted; font.family: root.fontFamily; font.pixelSize: Style.font.title }
-                PanelSlider {
+                DisplaySlider {
                   id: brightnessSlider
                   width: parent.width - Style.space(54)
                   enabled: root.brightnessAvailable && !actionProc.running
                   bar: root.bar
                   minimum: 1; maximum: 100; step: 1; integer: true
                   value: root.brightnessValue
+                  onPressed: function(value) {
+                    root.brightnessEditing = true
+                    root.brightnessDragSnapshot = root.snapshotUi()
+                  }
                   onMoved: function(value) { root.brightnessValue = Math.round(value) }
                   onReleased: function(value) {
                     root.brightnessValue = Math.round(value)
-                    root.runAction(["brightness", root.selectedId, String(root.brightnessValue)], "Brightness updated", true)
+                    root.brightnessEditing = false
+                    var snapshot = root.brightnessDragSnapshot
+                    root.brightnessDragSnapshot = null
+                    root.runAction(["brightness", root.selectedId, String(root.brightnessValue)], "Brightness updated", true, snapshot)
+                  }
+                  onCanceled: {
+                    root.brightnessEditing = false
+                    root.restoreUi(root.brightnessDragSnapshot)
+                    root.brightnessDragSnapshot = null
                   }
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "☀"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.title }
@@ -663,7 +826,12 @@ Panel {
                     bordered: true
                     active: root.selectedDisplay && Math.abs(root.selectedDisplay.scale - modelData) < 0.01
                     enabled: !!root.selectedDisplay && !actionProc.running
-                    onClicked: root.runAction(["scale", root.selectedId, String(modelData)], "Display scale updated")
+                    onClicked: {
+                      var scale = modelData
+                      var snapshot = root.snapshotUi()
+                      root.updateDisplay(root.selectedId, { scale: scale })
+                      root.runAction(["scale", root.selectedId, String(scale)], "Display scale updated", false, snapshot)
+                    }
                   }
                 }
               }
@@ -684,7 +852,16 @@ Panel {
                     fontFamily: root.fontFamily
                     value: root.currentModeFor(root.selectedDisplay)
                     options: root.refreshOptionsFor(root.selectedDisplay)
-                    onChanged: function(value) { root.runAction(["mode", root.selectedId, value], "Refresh rate updated") }
+                    onChanged: function(value) {
+                      var mode = root.parseMode(value)
+                      var snapshot = root.snapshotUi()
+                      if (mode) root.updateDisplay(root.selectedId, {
+                          width: mode.width,
+                          height: mode.height,
+                          refreshRate: mode.rate
+                      })
+                      root.runAction(["mode", root.selectedId, value], "Refresh rate updated", false, snapshot)
+                    }
                   }
                 }
                 Column {
@@ -741,14 +918,15 @@ Panel {
                   id: nightSwitch
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  enabled: !actionProc.running
+                  busy: actionProc.running
                   checked: root.nightLightEnabled
                   foreground: root.foreground
                   accent: Color.accent
                   onToggled: {
                     var next = !checked
+                    var snapshot = root.snapshotUi()
                     root.nightLightEnabled = next
-                    root.runAction(["nightlight", next ? "on" : "off"], next ? "Night Light enabled" : "Night Light disabled")
+                    root.runAction(["nightlight", next ? "on" : "off"], next ? "Night Light enabled" : "Night Light disabled", false, snapshot)
                   }
                 }
               }
@@ -761,14 +939,16 @@ Panel {
                   id: scheduleSwitch
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  enabled: !actionProc.running
+                  busy: actionProc.running
                   checked: root.scheduleEnabled
                   foreground: root.foreground
                   accent: Color.accent
                   onToggled: {
                     var next = !checked
+                    var snapshot = root.snapshotUi()
                     root.scheduleEnabled = next
-                    root.runAction(next ? ["schedule", "on", root.scheduleFrom, root.scheduleTo] : ["schedule", "off"], next ? "Night Light schedule enabled" : "Night Light schedule disabled")
+                    root.scheduleDraftDirty = true
+                    root.runAction(next ? ["schedule", "on", root.scheduleFrom, root.scheduleTo] : ["schedule", "off"], next ? "Night Light schedule enabled" : "Night Light schedule disabled", false, snapshot)
                   }
                 }
               }
@@ -789,8 +969,10 @@ Panel {
                     value: root.scheduleFrom
                     options: root.timeOptions
                     onChanged: function(value) {
+                      var snapshot = root.snapshotUi()
                       root.scheduleFrom = value
-                      if (root.scheduleEnabled) root.runAction(["schedule", "on", root.scheduleFrom, root.scheduleTo], "Night Light schedule updated")
+                      root.scheduleDraftDirty = true
+                      if (root.scheduleEnabled) root.runAction(["schedule", "on", root.scheduleFrom, root.scheduleTo], "Night Light schedule updated", false, snapshot)
                     }
                   }
                 }
@@ -807,8 +989,10 @@ Panel {
                     value: root.scheduleTo
                     options: root.timeOptions
                     onChanged: function(value) {
+                      var snapshot = root.snapshotUi()
                       root.scheduleTo = value
-                      if (root.scheduleEnabled) root.runAction(["schedule", "on", root.scheduleFrom, root.scheduleTo], "Night Light schedule updated")
+                      root.scheduleDraftDirty = true
+                      if (root.scheduleEnabled) root.runAction(["schedule", "on", root.scheduleFrom, root.scheduleTo], "Night Light schedule updated", false, snapshot)
                     }
                   }
                 }

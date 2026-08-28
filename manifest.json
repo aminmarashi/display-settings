@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "amin.display-settings",
   "name": "Display Settings",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Amin Marashi",
   "description": "Arrange displays and adjust scale, brightness, night light, and refresh rate.",
   "kinds": [
