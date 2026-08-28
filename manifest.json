@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "amin.display-settings",
+  "name": "Display Settings",
+  "version": "0.1.0",
+  "author": "Amin Marashi",
+  "homepage": "https://amin.codes",
+  "description": "Arrange displays and adjust scale, brightness, night light, and refresh rate.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Display Settings",
+    "description": "Arrange displays and tune their picture settings.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
