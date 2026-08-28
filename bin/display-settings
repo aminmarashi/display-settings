@@ -1,0 +1,429 @@
+#!/bin/bash
+
+set -euo pipefail
+
+CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}"
+PLUGIN_STATE_DIR="$CONFIG_ROOT/omarchy"
+PLUGIN_STATE_FILE="$PLUGIN_STATE_DIR/display-settings.json"
+MONITORS_CONFIG="$CONFIG_ROOT/hypr/monitors.lua"
+MONITORS_BACKUP="$PLUGIN_STATE_DIR/monitors.lua.before-display-settings"
+SUNSET_CONFIG="$CONFIG_ROOT/hypr/hyprsunset.conf"
+SUNSET_BACKUP="$PLUGIN_STATE_DIR/hyprsunset.conf.before-display-settings"
+MONITOR_BLOCK_START="-- BEGIN amin.display-settings"
+MONITOR_BLOCK_END="-- END amin.display-settings"
+SUNSET_MARKER="# Managed by amin.display-settings"
+
+fail() {
+  echo "display-settings: $*" >&2
+  exit 1
+}
+
+require_commands() {
+  local command_name
+  for command_name in hyprctl jq omarchy; do
+    command -v "$command_name" >/dev/null || fail "required command is missing: $command_name"
+  done
+}
+
+active_monitors() {
+  hyprctl monitors -j
+}
+
+monitor_json() {
+  local monitor="$1"
+  active_monitors | jq -ec --arg monitor "$monitor" '
+    .[] | select(.name == $monitor and .disabled != true and .width > 0 and .height > 0)
+  ' || fail "display is no longer connected: $monitor"
+}
+
+validate_monitor_name() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]*$ ]] || fail "invalid display name"
+}
+
+validate_percentage() {
+  [[ $1 =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 100 )) || fail "brightness must be between 1 and 100"
+}
+
+validate_time() {
+  [[ $1 =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || fail "time must use HH:MM"
+}
+
+clean_scale() {
+  local requested="$1"
+  local width="$2"
+  local height="$3"
+
+  awk -v scale="$requested" -v width="$width" -v height="$height" '
+    function gcd(a, b, t) { while (b) { t = a % b; a = b; b = t } return a }
+    BEGIN {
+      g = gcd(width * 120, height * 120)
+      k = int(scale * 120 + 0.5)
+      if (k > g) k = g
+      while (g % k != 0) k++
+      printf "%g\n", k / 120
+    }
+  '
+}
+
+mode_for_monitor_json() {
+  jq -r '"\(.width)x\(.height)@\(.refreshRate)Hz"' <<<"$1"
+}
+
+apply_monitor() {
+  local name="$1"
+  local mode="$2"
+  local position="$3"
+  local scale="$4"
+  local transform="$5"
+
+  validate_monitor_name "$name"
+  [[ $mode =~ ^[0-9]+x[0-9]+@[0-9]+([.][0-9]+)?Hz?$ ]] || fail "invalid display mode"
+  [[ $position =~ ^[0-9]+x[0-9]+$ ]] || fail "invalid display position"
+  [[ $scale =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "invalid display scale"
+  [[ $transform =~ ^[0-7]$ ]] || fail "invalid display transform"
+
+  hyprctl eval "hl.monitor({ output = \"$name\", mode = \"$mode\", position = \"$position\", scale = $scale, transform = $transform })" >/dev/null
+}
+
+state_from_runtime() {
+  local monitors="$1"
+  local previous='{"version":1,"monitors":{}}'
+
+  if [[ -f $PLUGIN_STATE_FILE ]]; then
+    previous=$(jq -e 'select(.version == 1 and (.monitors | type) == "object")' "$PLUGIN_STATE_FILE" 2>/dev/null || printf '%s' "$previous")
+  fi
+
+  jq -cn --argjson previous "$previous" --argjson monitors "$monitors" '
+    reduce ($monitors[] | select(.disabled != true and .width > 0 and .height > 0)) as $monitor
+      ($previous;
+        .monitors[$monitor.name] = {
+          mode: ("\($monitor.width)x\($monitor.height)@\($monitor.refreshRate)Hz"),
+          x: ($monitor.x | floor),
+          y: ($monitor.y | floor),
+          scale: $monitor.scale,
+          transform: ($monitor.transform // 0)
+        })
+  '
+}
+
+render_monitor_block() {
+  local state="$1"
+
+  printf '%s\n' "$MONITOR_BLOCK_START"
+  jq -r '
+    .monitors | to_entries | sort_by(.key)[] |
+    "hl.monitor({ output = \(.key | @json), mode = \(.value.mode | @json), position = \("\(.value.x)x\(.value.y)" | @json), scale = \(.value.scale), transform = \(.value.transform) })"
+  ' <<<"$state"
+  printf '%s\n' "$MONITOR_BLOCK_END"
+}
+
+persist_runtime() {
+  local monitors
+  local state
+  local current_config
+  local next_config
+  local config_errors
+
+  monitors=$(active_monitors)
+  state=$(state_from_runtime "$monitors")
+  mkdir -p "$PLUGIN_STATE_DIR" "$(dirname "$MONITORS_CONFIG")"
+  [[ -f $MONITORS_CONFIG ]] || : >"$MONITORS_CONFIG"
+  [[ -f $MONITORS_BACKUP ]] || cp -- "$MONITORS_CONFIG" "$MONITORS_BACKUP"
+
+  current_config=$(mktemp "$PLUGIN_STATE_DIR/monitors.current.XXXXXX")
+  next_config=$(mktemp "$PLUGIN_STATE_DIR/monitors.next.XXXXXX")
+  cp -- "$MONITORS_CONFIG" "$current_config"
+
+  awk -v start="$MONITOR_BLOCK_START" -v end="$MONITOR_BLOCK_END" '
+    $0 == start { managed = 1; next }
+    $0 == end { managed = 0; next }
+    !managed { print }
+  ' "$MONITORS_CONFIG" >"$next_config"
+
+  printf '\n' >>"$next_config"
+  render_monitor_block "$state" >>"$next_config"
+  install -m 0644 "$next_config" "$MONITORS_CONFIG"
+
+  hyprctl reload >/dev/null
+  config_errors=$(hyprctl configerrors 2>/dev/null || true)
+  if [[ -n $config_errors ]]; then
+    install -m 0644 "$current_config" "$MONITORS_CONFIG"
+    hyprctl reload >/dev/null 2>&1 || true
+    rm -f "$current_config" "$next_config"
+    fail "Hyprland rejected the saved display configuration: $config_errors"
+  fi
+
+  printf '%s\n' "$state" >"$PLUGIN_STATE_FILE"
+  rm -f "$current_config" "$next_config"
+}
+
+schedule_state() {
+  local times=()
+
+  if [[ -f $SUNSET_CONFIG ]] && grep -Fxq "$SUNSET_MARKER" "$SUNSET_CONFIG"; then
+    mapfile -t times < <(awk '/^[[:space:]]*time[[:space:]]*=/ { print $3 }' "$SUNSET_CONFIG")
+  fi
+
+  if (( ${#times[@]} >= 2 )); then
+    jq -cn --arg to "${times[0]}" --arg from "${times[1]}" '{enabled:true,from:$from,to:$to}'
+  else
+    jq -cn '{enabled:false,from:"21:00",to:"07:00"}'
+  fi
+}
+
+show_state() {
+  local monitors
+  local nightlight
+  local schedule
+
+  monitors=$(active_monitors)
+  nightlight=$(omarchy toggle nightlight --status 2>/dev/null || jq -cn '{enabled:false,temperature:null}')
+  schedule=$(schedule_state)
+
+  jq -cn --argjson monitors "$monitors" --argjson nightlight "$nightlight" --argjson schedule "$schedule" '
+    {
+      displays: [
+        $monitors[]
+        | select(.disabled != true and .width > 0 and .height > 0)
+        | {
+            name,
+            description: (.description // .name),
+            make: (.make // ""),
+            model: (.model // ""),
+            width,
+            height,
+            x: (.x | floor),
+            y: (.y | floor),
+            scale,
+            transform: (.transform // 0),
+            refreshRate,
+            focused: (.focused // false),
+            availableModes: (.availableModes // [])
+          }
+      ],
+      nightLight: ($nightlight + {schedule:$schedule})
+    }
+  '
+}
+
+show_brightness() {
+  local monitor="$1"
+  local value
+
+  validate_monitor_name "$monitor"
+  monitor_json "$monitor" >/dev/null
+  if value=$(omarchy brightness display --monitor "$monitor" 2>/dev/null) && [[ $value =~ ^[0-9]+$ ]]; then
+    jq -cn --argjson value "$value" '{available:true,value:$value}'
+  else
+    jq -cn '{available:false,value:null}'
+  fi
+}
+
+set_brightness() {
+  local monitor="$1"
+  local value="$2"
+
+  validate_monitor_name "$monitor"
+  validate_percentage "$value"
+  monitor_json "$monitor" >/dev/null
+  omarchy brightness display --no-osd --monitor "$monitor" "$value%" >/dev/null || fail "brightness control is unavailable for $monitor"
+  show_brightness "$monitor"
+}
+
+set_scale() {
+  local monitor="$1"
+  local requested="$2"
+  local info
+  local width
+  local height
+  local scale
+  local mode
+  local position
+  local transform
+
+  validate_monitor_name "$monitor"
+  [[ $requested =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "invalid display scale"
+  awk -v scale="$requested" 'BEGIN { exit !(scale >= 1 && scale <= 4) }' || fail "display scale must be between 1 and 4"
+
+  info=$(monitor_json "$monitor")
+  width=$(jq -r '.width' <<<"$info")
+  height=$(jq -r '.height' <<<"$info")
+  scale=$(clean_scale "$requested" "$width" "$height")
+  mode=$(mode_for_monitor_json "$info")
+  position="$(jq -r '.x | floor' <<<"$info")x$(jq -r '.y | floor' <<<"$info")"
+  transform=$(jq -r '.transform // 0' <<<"$info")
+
+  apply_monitor "$monitor" "$mode" "$position" "$scale" "$transform"
+  persist_runtime
+}
+
+set_mode() {
+  local monitor="$1"
+  local mode="$2"
+  local info
+  local position
+  local scale
+  local transform
+
+  validate_monitor_name "$monitor"
+  info=$(monitor_json "$monitor")
+  jq -e --arg mode "$mode" '((.availableModes // []) | index($mode)) != null' <<<"$info" >/dev/null \
+    || fail "unsupported mode for $monitor: $mode"
+
+  position="$(jq -r '.x | floor' <<<"$info")x$(jq -r '.y | floor' <<<"$info")"
+  scale=$(jq -r '.scale' <<<"$info")
+  transform=$(jq -r '.transform // 0' <<<"$info")
+
+  apply_monitor "$monitor" "$mode" "$position" "$scale" "$transform"
+  persist_runtime
+}
+
+arrange_displays() {
+  local layout="$1"
+  local item
+  local monitor
+  local x
+  local y
+  local info
+  local mode
+  local scale
+  local transform
+
+  jq -e '
+    type == "array" and length > 0 and
+    all(.[];
+      (.name | type) == "string" and
+      (.x | type) == "number" and .x >= 0 and .x <= 100000 and (.x | floor) == .x and
+      (.y | type) == "number" and .y >= 0 and .y <= 100000 and (.y | floor) == .y)
+  ' <<<"$layout" >/dev/null || fail "invalid display arrangement"
+
+  while IFS= read -r item; do
+    monitor=$(jq -r '.name' <<<"$item")
+    x=$(jq -r '.x' <<<"$item")
+    y=$(jq -r '.y' <<<"$item")
+    validate_monitor_name "$monitor"
+    info=$(monitor_json "$monitor")
+    mode=$(mode_for_monitor_json "$info")
+    scale=$(jq -r '.scale' <<<"$info")
+    transform=$(jq -r '.transform // 0' <<<"$info")
+    apply_monitor "$monitor" "$mode" "${x}x${y}" "$scale" "$transform"
+  done < <(jq -c '.[]' <<<"$layout")
+
+  persist_runtime
+}
+
+set_nightlight() {
+  case "$1" in
+  on) omarchy-shell -q nightlight enable >/dev/null ;;
+  off) omarchy-shell -q nightlight disable >/dev/null ;;
+  *) fail "night light must be on or off" ;;
+  esac
+}
+
+write_schedule() {
+  local from="$1"
+  local to="$2"
+  local next_config
+
+  validate_time "$from"
+  validate_time "$to"
+  [[ $from != "$to" ]] || fail "schedule start and end must differ"
+
+  mkdir -p "$PLUGIN_STATE_DIR" "$(dirname "$SUNSET_CONFIG")"
+  if [[ -f $SUNSET_CONFIG && ! -f $SUNSET_BACKUP ]]; then
+    cp -- "$SUNSET_CONFIG" "$SUNSET_BACKUP"
+  fi
+
+  next_config=$(mktemp "$PLUGIN_STATE_DIR/hyprsunset.next.XXXXXX")
+  {
+    printf '%s\n\n' "$SUNSET_MARKER"
+    printf 'profile {\n    time = %s\n    identity = true\n}\n\n' "$to"
+    printf 'profile {\n    time = %s\n    temperature = 4000\n}\n' "$from"
+  } >"$next_config"
+  install -m 0644 "$next_config" "$SUNSET_CONFIG"
+  rm -f "$next_config"
+
+  systemctl --user enable hyprsunset.service >/dev/null
+  systemctl --user restart hyprsunset.service || fail "could not restart hyprsunset"
+  omarchy-shell -q nightlight refresh >/dev/null 2>&1 || true
+}
+
+disable_schedule() {
+  [[ -f $SUNSET_BACKUP ]] || fail "the original hyprsunset configuration backup is missing"
+  install -m 0644 "$SUNSET_BACKUP" "$SUNSET_CONFIG"
+  systemctl --user restart hyprsunset.service || fail "could not restart hyprsunset"
+  omarchy-shell -q nightlight refresh >/dev/null 2>&1 || true
+}
+
+set_schedule() {
+  case "$1" in
+  on)
+    (( $# == 3 )) || fail "schedule requires start and end times"
+    write_schedule "$2" "$3"
+    ;;
+  off)
+    disable_schedule
+    ;;
+  *)
+    fail "schedule must be on or off"
+    ;;
+  esac
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: display-settings state
+       display-settings brightness MONITOR [PERCENT]
+       display-settings scale MONITOR SCALE
+       display-settings mode MONITOR MODE
+       display-settings arrange JSON
+       display-settings nightlight on|off
+       display-settings schedule on FROM TO
+       display-settings schedule off
+USAGE
+}
+
+require_commands
+
+case "${1:-}" in
+state)
+  (( $# == 1 )) || fail "state takes no arguments"
+  show_state
+  ;;
+brightness)
+  if (( $# == 2 )); then
+    show_brightness "$2"
+  elif (( $# == 3 )); then
+    set_brightness "$2" "$3"
+  else
+    fail "brightness requires a display and optional percentage"
+  fi
+  ;;
+scale)
+  (( $# == 3 )) || fail "scale requires a display and scale"
+  set_scale "$2" "$3"
+  ;;
+mode)
+  (( $# == 3 )) || fail "mode requires a display and mode"
+  set_mode "$2" "$3"
+  ;;
+arrange)
+  (( $# == 2 )) || fail "arrange requires layout JSON"
+  arrange_displays "$2"
+  ;;
+nightlight)
+  (( $# == 2 )) || fail "nightlight requires on or off"
+  set_nightlight "$2"
+  ;;
+schedule)
+  shift
+  set_schedule "$@"
+  ;;
+-h | --help)
+  usage
+  ;;
+*)
+  usage >&2
+  exit 1
+  ;;
+esac
