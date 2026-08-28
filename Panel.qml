@@ -26,6 +26,15 @@ Panel {
   property string brightnessMonitor: ""
   property bool brightnessEditing: false
   property var brightnessDragSnapshot: null
+  property string brightnessEditMonitor: ""
+  property int pendingBrightnessValue: 50
+  property bool brightnessSetQueued: false
+  property bool brightnessCommitPending: false
+  property bool brightnessRollbackPending: false
+  property bool brightnessHardwareTouched: false
+  property string brightnessRollbackMonitor: ""
+  property int brightnessRollbackValue: 50
+  property string brightnessApplyError: ""
   property string statusMessage: ""
   property bool statusIsError: false
   property string pendingSuccess: ""
@@ -44,6 +53,9 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color muted: alpha(foreground, 0.58)
   readonly property var selectedDisplay: displayById(selectedId)
+  readonly property bool brightnessBusy: brightnessEditing || brightnessCommitPending
+    || brightnessRollbackPending || brightnessApplyProc.running || brightnessRollbackProc.running
+  readonly property bool applying: actionProc.running || brightnessBusy
   readonly property var scaleOptions: [1, 1.25, 1.6, 2]
   readonly property var timeOptions: [
     "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
@@ -219,7 +231,7 @@ Panel {
   }
 
   function refresh() {
-    if (actionProc.running || draggingDisplay || brightnessEditing) {
+    if (actionProc.running || draggingDisplay || brightnessBusy) {
       stateRefreshPending = true
       return
     }
@@ -235,7 +247,7 @@ Panel {
 
   function loadBrightness() {
     if (!selectedDisplay) return
-    if (actionProc.running || brightnessEditing) {
+    if (actionProc.running || brightnessBusy) {
       brightnessRefreshPending = true
       return
     }
@@ -252,8 +264,90 @@ Panel {
     brightnessProc.running = true
   }
 
+  function beginBrightnessEdit() {
+    brightnessDragSnapshot = snapshotUi()
+    brightnessEditMonitor = selectedId
+    brightnessHardwareTouched = false
+    brightnessSetQueued = false
+    brightnessCommitPending = false
+    brightnessRollbackPending = false
+    brightnessEditing = true
+    uiGeneration += 1
+    stateRefreshPending = false
+    brightnessRefreshPending = false
+    reconcileTimer.stop()
+  }
+
+  function previewBrightness(value) {
+    brightnessValue = Math.round(value)
+    pendingBrightnessValue = brightnessValue
+    brightnessSetQueued = true
+    if (!brightnessApplyProc.running && !brightnessThrottle.running) brightnessThrottle.start()
+  }
+
+  function startBrightnessApply() {
+    if (!brightnessSetQueued || brightnessApplyProc.running || brightnessRollbackPending) return
+    brightnessSetQueued = false
+    brightnessApplyError = ""
+    brightnessHardwareTouched = true
+    brightnessApplyProc.command = [backendPath, "brightness", brightnessEditMonitor, String(pendingBrightnessValue)]
+    brightnessApplyProc.running = true
+  }
+
+  function commitBrightness(value) {
+    brightnessEditing = false
+    brightnessCommitPending = true
+    brightnessThrottle.stop()
+    pendingBrightnessValue = Math.round(value)
+    brightnessValue = pendingBrightnessValue
+    brightnessSetQueued = true
+    startBrightnessApply()
+  }
+
+  function finishBrightnessCommit() {
+    brightnessCommitPending = false
+    brightnessHardwareTouched = false
+    brightnessDragSnapshot = null
+    stateRefreshPending = false
+    brightnessRefreshPending = false
+    showStatus("Brightness updated", false)
+    reconcileTimer.reloadBrightness = true
+    reconcileTimer.restart()
+  }
+
+  function abortBrightnessEdit(message) {
+    var snapshot = brightnessDragSnapshot
+    if (!snapshot) return
+
+    brightnessThrottle.stop()
+    brightnessSetQueued = false
+    brightnessCommitPending = false
+    brightnessEditing = false
+    brightnessDragSnapshot = null
+    uiGeneration += 1
+    stateRefreshPending = false
+    brightnessRefreshPending = false
+
+    brightnessRollbackMonitor = brightnessEditMonitor
+    brightnessRollbackValue = Math.round(Number(snapshot.brightnessValue))
+    brightnessRollbackPending = brightnessHardwareTouched
+    restoreUi(snapshot)
+    if (brightnessSlider.dragging) brightnessSlider.cancelDrag()
+
+    if (message) showStatus(message, true)
+    if (brightnessRollbackPending && !brightnessApplyProc.running) Qt.callLater(startBrightnessRollback)
+  }
+
+  function startBrightnessRollback() {
+    if (!brightnessRollbackPending || brightnessApplyProc.running || brightnessRollbackProc.running) return
+    brightnessRollbackPending = false
+    brightnessRollbackProc.error = ""
+    brightnessRollbackProc.command = [backendPath, "brightness", brightnessRollbackMonitor, String(brightnessRollbackValue)]
+    brightnessRollbackProc.running = true
+  }
+
   function runAction(args, successMessage, reloadBrightness, snapshot) {
-    if (actionProc.running) {
+    if (actionProc.running || brightnessBusy) {
       if (snapshot) restoreUi(snapshot)
       return false
     }
@@ -353,6 +447,12 @@ Panel {
     onTriggered: root.retainPanelOpen = false
   }
 
+  Timer {
+    id: brightnessThrottle
+    interval: 75
+    onTriggered: root.startBrightnessApply()
+  }
+
   Process {
     id: stateProc
     command: [root.backendPath, "state"]
@@ -369,7 +469,7 @@ Panel {
     }
     onExited: function(exitCode) {
       var current = requestGeneration === root.uiGeneration
-        && !actionProc.running && !root.draggingDisplay && !root.brightnessEditing
+        && !actionProc.running && !root.draggingDisplay && !root.brightnessBusy
       if (exitCode !== 0) {
         if (current) root.showStatus(String(stateError.text || "Could not read display settings").trim(), true)
       } else if (current) {
@@ -397,7 +497,7 @@ Panel {
         }
       }
       if (root.stateRefreshPending && !actionProc.running
-          && !root.draggingDisplay && !root.brightnessEditing) Qt.callLater(root.refresh)
+          && !root.draggingDisplay && !root.brightnessBusy) Qt.callLater(root.refresh)
     }
   }
 
@@ -412,7 +512,7 @@ Panel {
     onExited: function(exitCode) {
       root.brightnessLoading = false
       var current = requestGeneration === root.uiGeneration
-        && !actionProc.running && !root.brightnessEditing
+        && !actionProc.running && !root.brightnessBusy
         && root.selectedId === root.brightnessMonitor
       if (exitCode === 0 && current) {
         try {
@@ -424,7 +524,48 @@ Panel {
         }
       }
       if ((root.brightnessRefreshPending || root.selectedId !== root.brightnessMonitor)
-          && !actionProc.running && !root.brightnessEditing) Qt.callLater(root.loadBrightness)
+          && !actionProc.running && !root.brightnessBusy) Qt.callLater(root.loadBrightness)
+    }
+  }
+
+  Process {
+    id: brightnessApplyProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.brightnessApplyError = String(text || "").trim()
+    }
+    onExited: function(exitCode) {
+      if (root.brightnessRollbackPending) {
+        Qt.callLater(root.startBrightnessRollback)
+        return
+      }
+      if (exitCode !== 0) {
+        root.abortBrightnessEdit(root.brightnessApplyError || "Could not update brightness")
+        return
+      }
+      if (root.brightnessSetQueued) {
+        if (root.brightnessCommitPending) Qt.callLater(root.startBrightnessApply)
+        else brightnessThrottle.restart()
+      } else if (root.brightnessCommitPending) {
+        root.finishBrightnessCommit()
+      }
+    }
+  }
+
+  Process {
+    id: brightnessRollbackProc
+    property string error: ""
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: brightnessRollbackProc.error = String(text || "").trim()
+    }
+    onExited: function(exitCode) {
+      root.brightnessHardwareTouched = false
+      if (exitCode !== 0) root.showStatus(brightnessRollbackProc.error || "Could not restore the previous brightness", true)
+      reconcileTimer.reloadBrightness = true
+      reconcileTimer.restart()
     }
   }
 
@@ -538,7 +679,7 @@ Panel {
             Text {
               id: liveText
               anchors.centerIn: parent
-              text: actionProc.running ? "APPLYING" : "LIVE"
+              text: root.applying ? "APPLYING" : "LIVE"
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -701,6 +842,7 @@ Panel {
                 MouseArea {
                   id: pointer
                   anchors.fill: parent
+                  enabled: !actionProc.running && !root.brightnessBusy
                   hoverEnabled: true
                   cursorShape: drag.active ? Qt.ClosedHandCursor : (root.displays.length > 1 ? Qt.OpenHandCursor : Qt.PointingHandCursor)
                   drag.target: root.displays.length > 1 ? displayTile : undefined
@@ -785,26 +927,15 @@ Panel {
                   id: brightnessSlider
                   width: parent.width - Style.space(54)
                   enabled: root.brightnessAvailable && !actionProc.running
+                    && !root.brightnessCommitPending && !root.brightnessRollbackPending
+                    && !brightnessRollbackProc.running
                   bar: root.bar
                   minimum: 1; maximum: 100; step: 1; integer: true
                   value: root.brightnessValue
-                  onPressed: function(value) {
-                    root.brightnessEditing = true
-                    root.brightnessDragSnapshot = root.snapshotUi()
-                  }
-                  onMoved: function(value) { root.brightnessValue = Math.round(value) }
-                  onReleased: function(value) {
-                    root.brightnessValue = Math.round(value)
-                    root.brightnessEditing = false
-                    var snapshot = root.brightnessDragSnapshot
-                    root.brightnessDragSnapshot = null
-                    root.runAction(["brightness", root.selectedId, String(root.brightnessValue)], "Brightness updated", true, snapshot)
-                  }
-                  onCanceled: {
-                    root.brightnessEditing = false
-                    root.restoreUi(root.brightnessDragSnapshot)
-                    root.brightnessDragSnapshot = null
-                  }
+                  onPressed: function(value) { root.beginBrightnessEdit() }
+                  onMoved: function(value) { root.previewBrightness(value) }
+                  onReleased: function(value) { root.commitBrightness(value) }
+                  onCanceled: root.abortBrightnessEdit("")
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "☀"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.title }
               }
@@ -825,7 +956,7 @@ Panel {
                     fontSize: Style.font.caption
                     bordered: true
                     active: root.selectedDisplay && Math.abs(root.selectedDisplay.scale - modelData) < 0.01
-                    enabled: !!root.selectedDisplay && !actionProc.running
+                    enabled: !!root.selectedDisplay && !root.applying
                     onClicked: {
                       var scale = modelData
                       var snapshot = root.snapshotUi()
@@ -846,7 +977,7 @@ Panel {
                   PanelSectionHeader { text: "REFRESH RATE"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     width: parent.width
-                    enabled: !!root.selectedDisplay && !actionProc.running
+                    enabled: !!root.selectedDisplay && !root.applying
                     showLabel: false
                     foreground: root.foreground
                     fontFamily: root.fontFamily
@@ -918,7 +1049,7 @@ Panel {
                   id: nightSwitch
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  busy: actionProc.running
+                  busy: root.applying
                   checked: root.nightLightEnabled
                   foreground: root.foreground
                   accent: Color.accent
@@ -939,7 +1070,7 @@ Panel {
                   id: scheduleSwitch
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  busy: actionProc.running
+                  busy: root.applying
                   checked: root.scheduleEnabled
                   foreground: root.foreground
                   accent: Color.accent
@@ -962,7 +1093,7 @@ Panel {
                   PanelSectionHeader { text: "FROM"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     width: parent.width
-                    enabled: !actionProc.running
+                    enabled: !root.applying
                     showLabel: false
                     foreground: root.foreground
                     fontFamily: root.fontFamily
@@ -982,7 +1113,7 @@ Panel {
                   PanelSectionHeader { text: "TO"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     width: parent.width
-                    enabled: !actionProc.running
+                    enabled: !root.applying
                     showLabel: false
                     foreground: root.foreground
                     fontFamily: root.fontFamily
