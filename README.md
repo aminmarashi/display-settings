@@ -36,7 +36,7 @@ Installation does not modify display or Night Light configuration. The plugin wr
 Install directly from the public GitHub repository and add the widget to your bar:
 
 ```bash
-omarchy plugin add https://github.com/aminmarashi/omarchy-display.git --enable
+omarchy plugin add https://github.com/marashiai/omarchy-display.git --enable
 ```
 
 Open **Display Settings** from the display icon in the Omarchy bar. To install a newer release later, run:
