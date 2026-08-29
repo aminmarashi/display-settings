@@ -725,7 +725,10 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     iconComponent: Component {
-      DisplayIcon { color: root.barIconColor }
+      DisplayIcon {
+        color: root.barIconColor
+        multiple: Quickshell.screens.length > 1
+      }
     }
     onPressed: function(button) { root.toggle() }
   }
@@ -765,6 +768,7 @@ Panel {
             width: Style.font.displayLarge
             height: width
             color: root.foreground
+            multiple: Quickshell.screens.length > 1
           }
           Column {
             id: titleBlock
