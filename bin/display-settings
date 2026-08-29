@@ -9,9 +9,12 @@ MONITORS_CONFIG="$CONFIG_ROOT/hypr/monitors.lua"
 MONITORS_BACKUP="$PLUGIN_STATE_DIR/monitors.lua.before-display-settings"
 SUNSET_CONFIG="$CONFIG_ROOT/hypr/hyprsunset.conf"
 SUNSET_BACKUP="$PLUGIN_STATE_DIR/hyprsunset.conf.before-display-settings"
-MONITOR_BLOCK_START="-- BEGIN amin.display-settings"
-MONITOR_BLOCK_END="-- END amin.display-settings"
-SUNSET_MARKER="# Managed by amin.display-settings"
+MONITOR_BLOCK_START="-- BEGIN omarchy-display"
+MONITOR_BLOCK_END="-- END omarchy-display"
+LEGACY_MONITOR_BLOCK_START="-- BEGIN amin.display-settings"
+LEGACY_MONITOR_BLOCK_END="-- END amin.display-settings"
+SUNSET_MARKER="# Managed by omarchy-display"
+LEGACY_SUNSET_MARKER="# Managed by amin.display-settings"
 
 fail() {
   echo "display-settings: $*" >&2
@@ -134,9 +137,10 @@ persist_runtime() {
   next_config=$(mktemp "$PLUGIN_STATE_DIR/monitors.next.XXXXXX")
   cp -- "$MONITORS_CONFIG" "$current_config"
 
-  awk -v start="$MONITOR_BLOCK_START" -v end="$MONITOR_BLOCK_END" '
-    $0 == start { managed = 1; next }
-    $0 == end { managed = 0; next }
+  awk -v start="$MONITOR_BLOCK_START" -v end="$MONITOR_BLOCK_END" \
+      -v legacy_start="$LEGACY_MONITOR_BLOCK_START" -v legacy_end="$LEGACY_MONITOR_BLOCK_END" '
+    $0 == start || $0 == legacy_start { managed = 1; next }
+    $0 == end || $0 == legacy_end { managed = 0; next }
     !managed { print }
   ' "$MONITORS_CONFIG" >"$next_config"
 
@@ -160,7 +164,8 @@ persist_runtime() {
 schedule_state() {
   local times=()
 
-  if [[ -f $SUNSET_CONFIG ]] && grep -Fxq "$SUNSET_MARKER" "$SUNSET_CONFIG"; then
+  if [[ -f $SUNSET_CONFIG ]] \
+      && grep -Fxq -e "$SUNSET_MARKER" -e "$LEGACY_SUNSET_MARKER" "$SUNSET_CONFIG"; then
     mapfile -t times < <(awk '/^[[:space:]]*time[[:space:]]*=/ { print $3 }' "$SUNSET_CONFIG")
   fi
 

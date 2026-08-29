@@ -87,9 +87,20 @@ jq -e '.available == true and .value == 42' <<<"$brightness" >/dev/null || fail 
 $BACKEND brightness DP-1 65 >/dev/null
 grep -Fq 'brightness display --no-osd --monitor DP-1 65%' "$MOCK_LOG" || fail "brightness was not applied"
 
+cat >"$HOME/.config/hypr/monitors.lua" <<'LUA'
+-- user monitor configuration
+-- BEGIN amin.display-settings
+legacy managed configuration
+-- END amin.display-settings
+LUA
+
 $BACKEND scale DP-1 1.25
 grep -Fq 'scale = 1.25' "$MOCK_LOG" || fail "scale was not applied"
-grep -Fq -- '-- BEGIN amin.display-settings' "$HOME/.config/hypr/monitors.lua" || fail "monitor config was not persisted"
+grep -Fq -- '-- BEGIN omarchy-display' "$HOME/.config/hypr/monitors.lua" || fail "monitor config was not persisted"
+grep -Fq -- '-- user monitor configuration' "$HOME/.config/hypr/monitors.lua" || fail "user monitor config was not preserved"
+if grep -Fq -- '-- BEGIN amin.display-settings' "$HOME/.config/hypr/monitors.lua"; then
+  fail "legacy monitor config marker was not migrated"
+fi
 
 $BACKEND mode DP-1 2560x1440@144.00Hz
 grep -Fq 'mode = "2560x1440@144.00Hz"' "$MOCK_LOG" || fail "mode was not applied"
@@ -105,7 +116,7 @@ $BACKEND arrange '[{"name":"DP-1","x":1920,"y":0},{"name":"eDP-1","x":0,"y":240}
 grep -Fq 'position = "1920x0"' "$MOCK_LOG" || fail "display position was not applied"
 
 $BACKEND schedule on 21:00 07:00
-grep -Fq '# Managed by amin.display-settings' "$HOME/.config/hypr/hyprsunset.conf" || fail "schedule was not written"
+grep -Fq '# Managed by omarchy-display' "$HOME/.config/hypr/hyprsunset.conf" || fail "schedule was not written"
 jq -e '.nightLight.schedule.enabled == true' < <($BACKEND state) >/dev/null || fail "schedule state was not detected"
 
 $BACKEND schedule off

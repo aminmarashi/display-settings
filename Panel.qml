@@ -8,8 +8,8 @@ import qs.Commons
 Panel {
   id: root
 
-  moduleName: "amin.display-settings"
-  ipcTarget: "amin.display-settings"
+  moduleName: "omarchy-display"
+  ipcTarget: "omarchy-display"
 
   property string selectedId: ""
   property real arrangementZoom: 1
@@ -52,6 +52,8 @@ Panel {
   readonly property color background: bar ? bar.background : Color.popups.background
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color muted: alpha(foreground, 0.58)
+  readonly property color barIconColor: barButton.active && barButton.useActiveColor
+    ? barButton.activeColor : barButton.foreground
   readonly property var selectedDisplay: displayById(selectedId)
   readonly property bool brightnessBusy: brightnessEditing || brightnessCommitPending
     || brightnessRollbackPending || brightnessApplyProc.running || brightnessRollbackProc.running
@@ -694,7 +696,9 @@ Panel {
     id: barButton
     anchors.fill: parent
     bar: root.bar
-    text: Quickshell.screens.length > 1 ? "▦" : "▣"
+    iconComponent: Component {
+      DisplayIcon { color: root.barIconColor }
+    }
     onPressed: function(button) { root.toggle() }
   }
 
@@ -726,14 +730,13 @@ Panel {
           width: parent.width
           implicitHeight: Math.max(titleIcon.implicitHeight, titleBlock.implicitHeight, liveBadge.implicitHeight)
 
-          Text {
+          DisplayIcon {
             id: titleIcon
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            text: "▣"
+            width: Style.font.displayLarge
+            height: width
             color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.displayLarge
           }
           Column {
             id: titleBlock

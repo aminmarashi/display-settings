@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "amin.display-settings",
+  "id": "omarchy-display",
   "name": "Display Settings",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "author": "Amin Marashi",
   "description": "Arrange displays and adjust resolution, scale, brightness, night light, and refresh rate.",
   "kinds": [
