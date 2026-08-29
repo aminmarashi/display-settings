@@ -2,7 +2,8 @@
 
 An Omarchy shell plugin for arranging displays and tuning per-monitor settings from the bar.
 
-![Display Settings showing two connected monitors](preview.png)
+https://github.com/user-attachments/assets/ac6435ad-fb1b-4010-8ab6-74a26aee4b3b
+
 
 ## Features
 
