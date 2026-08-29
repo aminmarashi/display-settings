@@ -5,7 +5,7 @@ An Omarchy shell plugin for arranging displays and tuning per-monitor settings f
 ## Features
 
 - Select and drag the displays reported by Hyprland to arrange the desktop.
-- Change per-display scale and refresh rate using modes supported by the monitor.
+- Change per-display resolution, scale, and refresh rate using modes supported by the monitor.
 - Control brightness through Omarchy's internal-backlight, DDC/CI, and Apple display support.
 - Enable Night Light immediately or schedule it for a daily time range.
 - Apply changes live and persist display settings across login and reboot.
@@ -26,7 +26,7 @@ No additional packages, network services, root privileges, or background daemons
 
 ## Configuration safety
 
-Installation does not modify display or Night Light configuration. The plugin writes configuration only after an explicit arrangement, scale, refresh-rate, or schedule action in the panel. It creates the backups described above before the first corresponding write and rolls back a rejected Hyprland configuration automatically.
+Installation does not modify display or Night Light configuration. The plugin writes configuration only after an explicit arrangement, resolution, scale, refresh-rate, or schedule action in the panel. It creates the backups described above before the first corresponding write and rolls back a rejected Hyprland configuration automatically.
 
 ## Install
 

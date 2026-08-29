@@ -193,6 +193,53 @@ Panel {
     return match ? { width: Number(match[1]), height: Number(match[2]), rate: Number(match[3]) } : null
   }
 
+  function resolutionValueFor(display) {
+    return display ? display.width + "x" + display.height : ""
+  }
+
+  function resolutionOptionsFor(display) {
+    if (!display) return []
+    var options = []
+    var seen = {}
+    var modes = display.availableModes || []
+    for (var i = 0; i < modes.length; i++) {
+      var parsed = parseMode(modes[i])
+      if (!parsed) continue
+      var value = parsed.width + "x" + parsed.height
+      if (seen[value]) continue
+      seen[value] = true
+      options.push({ value: value, label: parsed.width + " × " + parsed.height })
+    }
+    if (options.length === 0) {
+      options.push({
+        value: resolutionValueFor(display),
+        label: displayResolution(display)
+      })
+    }
+    return options
+  }
+
+  function modeForResolution(display, resolution) {
+    if (!display) return ""
+    var match = String(resolution).match(/^(\d+)x(\d+)$/)
+    if (!match) return ""
+    var width = Number(match[1])
+    var height = Number(match[2])
+    var modes = display.availableModes || []
+    var closest = ""
+    var difference = Number.MAX_VALUE
+    for (var i = 0; i < modes.length; i++) {
+      var parsed = parseMode(modes[i])
+      if (!parsed || parsed.width !== width || parsed.height !== height) continue
+      var candidate = Math.abs(parsed.rate - Number(display.refreshRate))
+      if (candidate < difference) {
+        closest = String(modes[i])
+        difference = candidate
+      }
+    }
+    return closest
+  }
+
   function refreshOptionsFor(display) {
     if (!display) return []
     var options = []
@@ -999,22 +1046,28 @@ Panel {
                   width: (parent.width - parent.spacing) / 2
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "RESOLUTION"; foreground: root.foreground; fontFamily: root.fontFamily }
-                  BorderSurface {
+                  Dropdown {
                     width: parent.width
-                    height: Style.spacing.controlHeight
-                    radius: Style.cornerRadius
-                    color: "transparent"
-                    borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
-                    Text {
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.verticalCenter: parent.verticalCenter
-                      anchors.margins: Style.spacing.controlPaddingX
-                      text: root.displayResolution(root.selectedDisplay)
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      elide: Text.ElideRight
+                    enabled: !!root.selectedDisplay && !root.applying
+                    showLabel: false
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    value: root.resolutionValueFor(root.selectedDisplay)
+                    options: root.resolutionOptionsFor(root.selectedDisplay)
+                    onChanged: function(value) {
+                      var selectedMode = root.modeForResolution(root.selectedDisplay, value)
+                      if (selectedMode === "") {
+                        root.showStatus("That resolution is no longer available", true)
+                        return
+                      }
+                      var mode = root.parseMode(selectedMode)
+                      var snapshot = root.snapshotUi()
+                      root.updateDisplay(root.selectedId, {
+                        width: mode.width,
+                        height: mode.height,
+                        refreshRate: mode.rate
+                      })
+                      root.runAction(["mode", root.selectedId, selectedMode], "Display resolution updated", false, snapshot)
                     }
                   }
                 }

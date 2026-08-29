@@ -24,7 +24,7 @@ case "${1:-} ${2:-}" in
     "name":"DP-1","description":"External Display","make":"Example","model":"Panel",
     "width":2560,"height":1440,"x":0,"y":0,"scale":1,"transform":0,
     "refreshRate":60.0,"focused":true,"disabled":false,
-    "availableModes":["2560x1440@60.00Hz","2560x1440@144.00Hz"]
+    "availableModes":["2560x1440@60.00Hz","2560x1440@144.00Hz","1920x1080@60.00Hz"]
   },
   {
     "name":"eDP-1","description":"Built-in Display","make":"Example","model":"Laptop",
@@ -90,6 +90,9 @@ grep -Fq -- '-- BEGIN amin.display-settings' "$HOME/.config/hypr/monitors.lua" |
 
 $BACKEND mode DP-1 2560x1440@144.00Hz
 grep -Fq 'mode = "2560x1440@144.00Hz"' "$MOCK_LOG" || fail "mode was not applied"
+
+$BACKEND mode DP-1 1920x1080@60.00Hz
+grep -Fq 'mode = "1920x1080@60.00Hz"' "$MOCK_LOG" || fail "resolution was not applied"
 
 if $BACKEND mode DP-1 '2560x1440@999.00Hz' >/dev/null 2>&1; then
   fail "unsupported mode was accepted"
