@@ -65,6 +65,7 @@ Panel {
   readonly property real layoutMinY: layoutBound("minY")
   readonly property real layoutMaxX: layoutBound("maxX")
   readonly property real layoutMaxY: layoutBound("maxY")
+  readonly property real physicalUnitScale: calculatePhysicalUnitScale()
 
   function alpha(color, opacity) {
     return Qt.rgba(color.r, color.g, color.b, opacity)
@@ -157,16 +158,57 @@ Panel {
     return ((display.transform % 2) ? display.width : display.height) / Math.max(0.1, display.scale)
   }
 
+  function hasPhysicalSize(display) {
+    return display && Number(display.physicalWidth) > 0 && Number(display.physicalHeight) > 0
+  }
+
+  function physicalWidth(display) {
+    return (display.transform % 2) ? Number(display.physicalHeight) : Number(display.physicalWidth)
+  }
+
+  function physicalHeight(display) {
+    return (display.transform % 2) ? Number(display.physicalWidth) : Number(display.physicalHeight)
+  }
+
+  function calculatePhysicalUnitScale() {
+    var smallest = 0
+    for (var i = 0; i < displays.length; i++) {
+      var display = displays[i]
+      if (!hasPhysicalSize(display)) continue
+      var candidate = Math.min(
+        physicalWidth(display) / logicalWidth(display),
+        physicalHeight(display) / logicalHeight(display))
+      if (candidate > 0 && (smallest === 0 || candidate < smallest)) smallest = candidate
+    }
+    return smallest > 0 ? smallest : 1
+  }
+
+  function visualX(display) {
+    return Number(display.x) * physicalUnitScale
+  }
+
+  function visualY(display) {
+    return Number(display.y) * physicalUnitScale
+  }
+
+  function visualWidth(display) {
+    return hasPhysicalSize(display) ? physicalWidth(display) : logicalWidth(display) * physicalUnitScale
+  }
+
+  function visualHeight(display) {
+    return hasPhysicalSize(display) ? physicalHeight(display) : logicalHeight(display) * physicalUnitScale
+  }
+
   function layoutBound(kind) {
     if (displays.length === 0) return 0
     var value
     for (var i = 0; i < displays.length; i++) {
       var display = displays[i]
       var candidate
-      if (kind === "minX") candidate = display.x
-      else if (kind === "minY") candidate = display.y
-      else if (kind === "maxX") candidate = display.x + logicalWidth(display)
-      else candidate = display.y + logicalHeight(display)
+      if (kind === "minX") candidate = visualX(display)
+      else if (kind === "minY") candidate = visualY(display)
+      else if (kind === "maxX") candidate = visualX(display) + visualWidth(display)
+      else candidate = visualY(display) + visualHeight(display)
       if (value === undefined || (kind.indexOf("min") === 0 ? candidate < value : candidate > value)) value = candidate
     }
     return value || 0
@@ -420,8 +462,10 @@ Panel {
 
   function applyArrangement(movedName, screenX, screenY) {
     if (canvas.layoutScale <= 0) return
-    var movedX = Math.round(((screenX - canvas.originX) / canvas.layoutScale) / 10) * 10
-    var movedY = Math.round(((screenY - canvas.originY) / canvas.layoutScale) / 10) * 10
+    var visualPositionX = (screenX - canvas.originX) / canvas.layoutScale
+    var visualPositionY = (screenY - canvas.originY) / canvas.layoutScale
+    var movedX = Math.round((visualPositionX / physicalUnitScale) / 10) * 10
+    var movedY = Math.round((visualPositionY / physicalUnitScale) / 10) * 10
     var layout = []
     var minimumX = Number.MAX_VALUE
     var minimumY = Number.MAX_VALUE
@@ -838,10 +882,10 @@ Panel {
                 required property int index
                 readonly property bool selected: root.selectedId === modelData.name
                 readonly property real bezel: Style.space(5)
-                x: canvas.originX + modelData.x * canvas.layoutScale
-                y: canvas.originY + modelData.y * canvas.layoutScale
-                width: root.logicalWidth(modelData) * canvas.layoutScale
-                height: root.logicalHeight(modelData) * canvas.layoutScale + Style.space(28)
+                x: canvas.originX + root.visualX(modelData) * canvas.layoutScale
+                y: canvas.originY + root.visualY(modelData) * canvas.layoutScale
+                width: root.visualWidth(modelData) * canvas.layoutScale
+                height: root.visualHeight(modelData) * canvas.layoutScale + Style.space(28)
                 z: pointer.drag.active ? 20 : (selected ? 10 : index)
                 Behavior on x { enabled: !pointer.drag.active; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                 Behavior on y { enabled: !pointer.drag.active; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -890,6 +934,8 @@ Panel {
                 }
                 MouseArea {
                   id: pointer
+                  property real pressTileX: 0
+                  property real pressTileY: 0
                   anchors.fill: parent
                   enabled: !actionProc.running && !root.brightnessBusy
                   hoverEnabled: true
@@ -899,7 +945,18 @@ Panel {
                   drag.minimumY: 0
                   drag.maximumX: Math.max(0, canvas.width - displayTile.width)
                   drag.maximumY: Math.max(0, canvas.height - displayTile.height)
-                  onPressed: { root.selectedId = modelData.name; root.draggingDisplay = root.displays.length > 1 }
+                  drag.threshold: Style.space(4)
+                  onPressed: {
+                    pressTileX = displayTile.x
+                    pressTileY = displayTile.y
+                    root.selectedId = modelData.name
+                    root.draggingDisplay = false
+                  }
+                  onPositionChanged: {
+                    if (!pressed || root.displays.length < 2) return
+                    root.draggingDisplay = Math.abs(displayTile.x - pressTileX) > Style.space(3)
+                      || Math.abs(displayTile.y - pressTileY) > Style.space(3)
+                  }
                   onReleased: {
                     if (root.draggingDisplay) root.applyArrangement(modelData.name, displayTile.x, displayTile.y)
                     root.draggingDisplay = false

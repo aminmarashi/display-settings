@@ -196,6 +196,8 @@ show_state() {
             y: (.y | floor),
             scale,
             transform: (.transform // 0),
+            physicalWidth: (.physicalWidth // 0),
+            physicalHeight: (.physicalHeight // 0),
             refreshRate,
             focused: (.focused // false),
             availableModes: (.availableModes // [])

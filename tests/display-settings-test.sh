@@ -23,12 +23,14 @@ case "${1:-} ${2:-}" in
   {
     "name":"DP-1","description":"External Display","make":"Example","model":"Panel",
     "width":2560,"height":1440,"x":0,"y":0,"scale":1,"transform":0,
+    "physicalWidth":600,"physicalHeight":340,
     "refreshRate":60.0,"focused":true,"disabled":false,
     "availableModes":["2560x1440@60.00Hz","2560x1440@144.00Hz","1920x1080@60.00Hz"]
   },
   {
     "name":"eDP-1","description":"Built-in Display","make":"Example","model":"Laptop",
     "width":1920,"height":1200,"x":2560,"y":0,"scale":1.25,"transform":0,
+    "physicalWidth":340,"physicalHeight":220,
     "refreshRate":60.0,"focused":false,"disabled":false,
     "availableModes":["1920x1200@60.00Hz"]
   }
@@ -76,6 +78,7 @@ fail() {
 
 state=$($BACKEND state)
 jq -e '.displays | length == 2' <<<"$state" >/dev/null || fail "state did not expose active displays"
+jq -e '.displays[0].physicalWidth == 600 and .displays[1].physicalHeight == 220' <<<"$state" >/dev/null || fail "state did not expose physical display sizes"
 jq -e '.nightLight.schedule.enabled == false' <<<"$state" >/dev/null || fail "unexpected schedule state"
 
 brightness=$($BACKEND brightness DP-1)
