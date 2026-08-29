@@ -16,6 +16,18 @@ Enabling the Night Light schedule backs up `~/.config/hypr/hyprsunset.conf`, ins
 
 Brightness is shown as unavailable when the selected monitor does not expose a supported control method.
 
+## Requirements
+
+- Omarchy Quattro with its standard `omarchy`, `omarchy-shell`, `hyprctl`, `jq`, Bash, and user-systemd tools.
+- Brightness hardware supported by `omarchy brightness display`; unsupported monitors remain available for arrangement, scale, and refresh-rate controls.
+- The standard `hyprsunset` user service for Night Light scheduling.
+
+No additional packages, network services, root privileges, or background daemons are required.
+
+## Configuration safety
+
+Installation does not modify display or Night Light configuration. The plugin writes configuration only after an explicit arrangement, scale, refresh-rate, or schedule action in the panel. It creates the backups described above before the first corresponding write and rolls back a rejected Hyprland configuration automatically.
+
 ## Install
 
 ```bash
@@ -23,6 +35,14 @@ omarchy plugin add https://github.com/aminmarashi/display-settings.git --enable
 ```
 
 Open **Display Settings** from the `▣` icon in the Omarchy bar.
+
+## Remove
+
+```bash
+omarchy plugin remove amin.display-settings
+```
+
+Removal leaves the last explicitly applied display settings in place. Any backups created by the plugin remain available at `~/.config/omarchy/monitors.lua.before-display-settings` and `~/.config/omarchy/hyprsunset.conf.before-display-settings` if you want to restore them before removing the plugin.
 
 ## Test
 
