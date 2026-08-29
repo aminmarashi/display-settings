@@ -613,9 +613,9 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    centerOnBar: true
+    centerOnBar: false
     contentWidth: panel.fittedContentWidth(Style.space(930))
-    contentHeight: panel.cappedContentHeight(Style.space(790))
+    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(790))
 
     Controls.ScrollView {
       id: scrollArea
@@ -1143,17 +1143,18 @@ Panel {
 
         BorderSurface {
           width: parent.width
+          visible: root.statusMessage !== "" && root.statusIsError
           implicitHeight: footerText.implicitHeight + Style.space(16)
           radius: Style.cornerRadius
-          color: root.statusMessage !== "" ? root.alpha(root.statusIsError ? Color.urgent : Color.accent, 0.12) : root.alpha(Color.accent, 0.08)
-          borderSpec: Border.flat(root.alpha(root.statusMessage !== "" && root.statusIsError ? Color.urgent : Color.accent, 0.34), 1)
+          color: root.alpha(Color.urgent, 0.12)
+          borderSpec: Border.flat(root.alpha(Color.urgent, 0.34), 1)
           Text {
             id: footerText
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             anchors.margins: Style.space(12)
-            text: root.statusMessage !== "" ? root.statusMessage : "Arrangement, scale, refresh rate, and schedules are saved for the next login."
+            text: root.statusMessage
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
