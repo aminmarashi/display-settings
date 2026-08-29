@@ -112,8 +112,18 @@ if $BACKEND mode DP-1 '2560x1440@999.00Hz' >/dev/null 2>&1; then
   fail "unsupported mode was accepted"
 fi
 
-$BACKEND arrange '[{"name":"DP-1","x":1920,"y":0},{"name":"eDP-1","x":0,"y":240}]'
-grep -Fq 'position = "1920x0"' "$MOCK_LOG" || fail "display position was not applied"
+evals_before_arrangement=$(awk '/^hyprctl eval/ { count++ } END { print count + 0 }' "$MOCK_LOG")
+$BACKEND arrange '[{"name":"DP-1","x":1536,"y":0},{"name":"eDP-1","x":0,"y":240}]'
+evals_after_arrangement=$(awk '/^hyprctl eval/ { count++ } END { print count + 0 }' "$MOCK_LOG")
+grep -Fq 'position = "1536x0"' "$HOME/.config/hypr/monitors.lua" || fail "edge-touching display position was not applied"
+[[ $evals_before_arrangement == "$evals_after_arrangement" ]] || fail "display arrangement was applied one monitor at a time"
+
+calls_before_overlap=$(wc -l <"$MOCK_LOG")
+if $BACKEND arrange '[{"name":"DP-1","x":0,"y":0},{"name":"eDP-1","x":0,"y":0}]' >/dev/null 2>&1; then
+  fail "overlapping display arrangement was accepted"
+fi
+calls_after_overlap=$(wc -l <"$MOCK_LOG")
+[[ $calls_before_overlap == "$calls_after_overlap" ]] || fail "overlapping arrangement was partially applied"
 
 $BACKEND schedule on 21:00 07:00
 grep -Fq '# Managed by omarchy-display' "$HOME/.config/hypr/hyprsunset.conf" || fail "schedule was not written"

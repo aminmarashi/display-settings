@@ -120,15 +120,12 @@ render_monitor_block() {
   printf '%s\n' "$MONITOR_BLOCK_END"
 }
 
-persist_runtime() {
-  local monitors
-  local state
+persist_state() {
+  local state="$1"
   local current_config
   local next_config
   local config_errors
 
-  monitors=$(active_monitors)
-  state=$(state_from_runtime "$monitors")
   mkdir -p "$PLUGIN_STATE_DIR" "$(dirname "$MONITORS_CONFIG")"
   [[ -f $MONITORS_CONFIG ]] || : >"$MONITORS_CONFIG"
   [[ -f $MONITORS_BACKUP ]] || cp -- "$MONITORS_CONFIG" "$MONITORS_BACKUP"
@@ -159,6 +156,15 @@ persist_runtime() {
 
   printf '%s\n' "$state" >"$PLUGIN_STATE_FILE"
   rm -f "$current_config" "$next_config"
+}
+
+persist_runtime() {
+  local monitors
+  local state
+
+  monitors=$(active_monitors)
+  state=$(state_from_runtime "$monitors")
+  persist_state "$state"
 }
 
 schedule_state() {
@@ -287,36 +293,65 @@ set_mode() {
 
 arrange_displays() {
   local layout="$1"
+  local monitors
   local item
   local monitor
-  local x
-  local y
-  local info
-  local mode
-  local scale
-  local transform
+  local state
 
   jq -e '
     type == "array" and length > 0 and
+    (map(.name) | unique | length) == length and
     all(.[];
       (.name | type) == "string" and
       (.x | type) == "number" and .x >= 0 and .x <= 100000 and (.x | floor) == .x and
       (.y | type) == "number" and .y >= 0 and .y <= 100000 and (.y | floor) == .y)
   ' <<<"$layout" >/dev/null || fail "invalid display arrangement"
 
+  monitors=$(active_monitors)
+  jq -e --argjson monitors "$monitors" '
+    [$monitors[] | select(.disabled != true and .width > 0 and .height > 0)] as $active |
+    (map(.name) | sort) == ([$active[].name] | sort)
+  ' <<<"$layout" >/dev/null || fail "connected displays changed; reopen Display Settings"
+
+  jq -e --argjson monitors "$monitors" '
+    . as $layout |
+    ([
+      $layout[] as $position |
+      $monitors[] |
+      select(.name == $position.name) |
+      . as $monitor |
+      {
+        x: $position.x,
+        y: $position.y,
+        width: ((if (($monitor.transform // 0) % 2) == 1 then $monitor.height else $monitor.width end) / $monitor.scale),
+        height: ((if (($monitor.transform // 0) % 2) == 1 then $monitor.width else $monitor.height end) / $monitor.scale)
+      }
+    ]) as $rectangles |
+    ([
+      range(0; $rectangles | length) as $first |
+      range($first + 1; $rectangles | length) as $second |
+      select(
+        $rectangles[$first].x < ($rectangles[$second].x + $rectangles[$second].width) and
+        ($rectangles[$first].x + $rectangles[$first].width) > $rectangles[$second].x and
+        $rectangles[$first].y < ($rectangles[$second].y + $rectangles[$second].height) and
+        ($rectangles[$first].y + $rectangles[$first].height) > $rectangles[$second].y
+      )
+    ] | length == 0)
+  ' <<<"$layout" >/dev/null || fail "displays cannot overlap"
+
   while IFS= read -r item; do
     monitor=$(jq -r '.name' <<<"$item")
-    x=$(jq -r '.x' <<<"$item")
-    y=$(jq -r '.y' <<<"$item")
     validate_monitor_name "$monitor"
-    info=$(monitor_json "$monitor")
-    mode=$(mode_for_monitor_json "$info")
-    scale=$(jq -r '.scale' <<<"$info")
-    transform=$(jq -r '.transform // 0' <<<"$info")
-    apply_monitor "$monitor" "$mode" "${x}x${y}" "$scale" "$transform"
   done < <(jq -c '.[]' <<<"$layout")
 
-  persist_runtime
+  state=$(state_from_runtime "$monitors")
+  state=$(jq -cn --argjson state "$state" --argjson layout "$layout" '
+    reduce $layout[] as $position
+      ($state;
+        .monitors[$position.name].x = $position.x |
+        .monitors[$position.name].y = $position.y)
+  ')
+  persist_state "$state"
 }
 
 set_nightlight() {

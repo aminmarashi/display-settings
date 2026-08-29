@@ -6,7 +6,7 @@ An Omarchy shell plugin for arranging displays and tuning per-monitor settings f
 
 ## Features
 
-- Select and drag the displays reported by Hyprland to arrange the desktop.
+- Select and drag the displays reported by Hyprland; overlapping positions snap to the nearest clear edge.
 - Size monitor previews from EDID dimensions with gentle compression for a natural arrangement view.
 - Change per-display resolution, scale, and refresh rate using modes supported by the monitor.
 - Control brightness through Omarchy's internal-backlight, DDC/CI, and Apple display support.
@@ -59,6 +59,7 @@ Removal leaves the last explicitly applied display settings in place. Any backup
 
 ```bash
 ./tests/display-settings-test.sh
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_arrangement.qml
 omarchy plugin validate .
 ```
 

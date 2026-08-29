@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import "Arrangement.js" as Arrangement
 
 Panel {
   id: root
@@ -227,6 +228,44 @@ Panel {
     return hasPhysicalSize(display)
       ? physicalHeight(display) * previewPhysicalScale(display)
       : logicalHeight(display) * physicalUnitScale
+  }
+
+  function arrangementWidth(display) {
+    return Math.max(logicalWidth(display), visualWidth(display) / Math.max(0.01, physicalUnitScale))
+  }
+
+  function arrangementHeight(display) {
+    return Math.max(logicalHeight(display), visualHeight(display) / Math.max(0.01, physicalUnitScale))
+  }
+
+  function arrangementRectangles() {
+    var rectangles = []
+    for (var i = 0; i < displays.length; i++) {
+      var display = displays[i]
+      rectangles.push({
+        name: display.name,
+        x: Number(display.x),
+        y: Number(display.y),
+        width: arrangementWidth(display),
+        height: arrangementHeight(display)
+      })
+    }
+    return rectangles
+  }
+
+  function nearestClearPosition(movedName, requestedX, requestedY) {
+    return Arrangement.nearestClearPosition(arrangementRectangles(), movedName, requestedX, requestedY)
+  }
+
+  function constrainDragPosition(movedName, screenX, screenY) {
+    if (canvas.layoutScale <= 0) return { x: screenX, y: screenY }
+    var requestedX = ((screenX - canvas.originX) / canvas.layoutScale) / physicalUnitScale
+    var requestedY = ((screenY - canvas.originY) / canvas.layoutScale) / physicalUnitScale
+    var position = nearestClearPosition(movedName, requestedX, requestedY)
+    return {
+      x: canvas.originX + position.x * physicalUnitScale * canvas.layoutScale,
+      y: canvas.originY + position.y * physicalUnitScale * canvas.layoutScale
+    }
   }
 
   function layoutBound(kind) {
@@ -496,6 +535,9 @@ Panel {
     var visualPositionY = (screenY - canvas.originY) / canvas.layoutScale
     var movedX = Math.round((visualPositionX / physicalUnitScale) / 10) * 10
     var movedY = Math.round((visualPositionY / physicalUnitScale) / 10) * 10
+    var clearPosition = nearestClearPosition(movedName, movedX, movedY)
+    movedX = clearPosition.x
+    movedY = clearPosition.y
     var layout = []
     var minimumX = Number.MAX_VALUE
     var minimumY = Number.MAX_VALUE
@@ -839,7 +881,7 @@ Panel {
               spacing: Style.space(1)
               PanelSectionHeader { text: "ARRANGE DISPLAYS"; foreground: root.foreground; fontFamily: root.fontFamily }
               Text {
-                text: root.displays.length > 1 ? "Drag a display to reposition it · click to edit" : "Connect another display to arrange your desktop"
+                text: root.displays.length > 1 ? "Drag to reposition · displays snap together without overlap" : "Connect another display to arrange your desktop"
                 color: root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -988,7 +1030,10 @@ Panel {
                     root.draggingDisplay = false
                   }
                   onPositionChanged: {
-                    if (!pressed || root.displays.length < 2) return
+                    if (!pressed || !drag.active || root.displays.length < 2) return
+                    var constrained = root.constrainDragPosition(modelData.name, displayTile.x, displayTile.y)
+                    displayTile.x = constrained.x
+                    displayTile.y = constrained.y
                     root.draggingDisplay = Math.abs(displayTile.x - pressTileX) > Style.space(3)
                       || Math.abs(displayTile.y - pressTileY) > Style.space(3)
                   }
