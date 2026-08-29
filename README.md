@@ -31,7 +31,7 @@ Installation does not modify display or Night Light configuration. The plugin wr
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/aminmarashi/display-settings.git --enable
+omarchy plugin add https://github.com/aminmarashi/omarchy-display.git --enable
 ```
 
 Open **Display Settings** from the `▣` icon in the Omarchy bar.
