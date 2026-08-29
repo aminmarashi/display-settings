@@ -676,7 +676,7 @@ Panel {
       Column {
         id: contentColumn
         width: scrollArea.availableWidth
-        spacing: Style.space(14)
+        spacing: Style.space(12)
 
         Item {
           width: parent.width
@@ -742,7 +742,7 @@ Panel {
 
         BorderSurface {
           width: parent.width
-          height: Style.space(318)
+          height: Style.space(270)
           radius: Style.cornerRadius
           color: Style.normalFillFor(root.foreground, Color.accent)
           borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
@@ -939,14 +939,14 @@ Panel {
           id: detailCards
           readonly property real naturalWidth: displaySettingsCard.implicitWidth + spacing + nightLightCard.implicitWidth
           width: parent.width
-          spacing: Style.space(14)
+          spacing: Style.space(12)
 
           BorderSurface {
             id: displaySettingsCard
             implicitWidth: refreshRateDropdown.implicitWidth + resolutionDropdown.implicitWidth
-              + Style.space(12) + Style.space(30)
+              + Style.space(10) + Style.space(24)
             width: (parent.width - parent.spacing) * implicitWidth / parent.naturalWidth
-            height: settingsColumn.implicitHeight + Style.space(30)
+            height: settingsColumn.implicitHeight + Style.space(24)
             radius: Style.cornerRadius
             color: Style.normalFillFor(root.foreground, Color.accent)
             borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
@@ -955,8 +955,8 @@ Panel {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
-              anchors.margins: Style.space(15)
-              spacing: Style.space(10)
+              anchors.margins: Style.space(12)
+              spacing: Style.space(8)
 
               Item {
                 width: parent.width
@@ -1024,14 +1024,14 @@ Panel {
               PanelSeparator { foreground: root.foreground }
               Row {
                 width: parent.width
-                spacing: Style.space(12)
+                spacing: Style.space(10)
                 Column {
                   width: (parent.width - parent.spacing) / 2
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "REFRESH RATE"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     id: refreshRateDropdown
-                    implicitWidth: Style.space(180)
+                    implicitWidth: Style.space(150)
                     width: parent.width
                     enabled: !!root.selectedDisplay && !root.applying
                     showLabel: false
@@ -1057,7 +1057,7 @@ Panel {
                   PanelSectionHeader { text: "RESOLUTION"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     id: resolutionDropdown
-                    implicitWidth: Style.space(180)
+                    implicitWidth: Style.space(150)
                     width: parent.width
                     enabled: !!root.selectedDisplay && !root.applying
                     showLabel: false
@@ -1089,16 +1089,16 @@ Panel {
           BorderSurface {
             id: nightLightCard
             implicitWidth: scheduleFromDropdown.implicitWidth + scheduleToDropdown.implicitWidth
-              + Style.space(10) + Style.space(30)
+              + Style.space(8) + Style.space(24)
             width: parent.width - parent.spacing - displaySettingsCard.width
-            height: settingsColumn.implicitHeight + Style.space(30)
+            height: settingsColumn.implicitHeight + Style.space(24)
             radius: Style.cornerRadius
             color: Style.normalFillFor(root.foreground, Color.accent)
             borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
             Column {
               anchors.fill: parent
-              anchors.margins: Style.space(15)
-              spacing: Style.space(10)
+              anchors.margins: Style.space(12)
+              spacing: Style.space(8)
               Item {
                 width: parent.width
                 implicitHeight: Math.max(nightTitle.implicitHeight, nightSwitch.implicitHeight)
@@ -1152,7 +1152,7 @@ Panel {
               }
               Row {
                 width: parent.width
-                spacing: Style.space(10)
+                spacing: Style.space(8)
                 opacity: root.scheduleEnabled ? 1 : 0.38
                 Column {
                   width: (parent.width - parent.spacing) / 2
@@ -1160,7 +1160,7 @@ Panel {
                   PanelSectionHeader { text: "FROM"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     id: scheduleFromDropdown
-                    implicitWidth: Style.space(120)
+                    implicitWidth: Style.space(96)
                     width: parent.width
                     enabled: !root.applying
                     showLabel: false
@@ -1182,7 +1182,7 @@ Panel {
                   PanelSectionHeader { text: "TO"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
                     id: scheduleToDropdown
-                    implicitWidth: Style.space(120)
+                    implicitWidth: Style.space(96)
                     width: parent.width
                     enabled: !root.applying
                     showLabel: false
