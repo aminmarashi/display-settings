@@ -661,7 +661,9 @@ Panel {
     bar: root.bar
     open: root.opened
     centerOnBar: false
-    contentWidth: panel.fittedContentWidth(Style.space(930))
+    contentWidth: panel.fittedContentWidth(
+      detailCards.naturalWidth + panel.padding * 2
+        + Border.left(panel.borderSpec) + Border.right(panel.borderSpec))
     contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(790))
 
     Controls.ScrollView {
@@ -934,11 +936,16 @@ Panel {
         }
 
         Row {
+          id: detailCards
+          readonly property real naturalWidth: displaySettingsCard.implicitWidth + spacing + nightLightCard.implicitWidth
           width: parent.width
           spacing: Style.space(14)
 
           BorderSurface {
-            width: (parent.width - parent.spacing) * 0.59
+            id: displaySettingsCard
+            implicitWidth: refreshRateDropdown.implicitWidth + resolutionDropdown.implicitWidth
+              + Style.space(12) + Style.space(30)
+            width: (parent.width - parent.spacing) * implicitWidth / parent.naturalWidth
             height: settingsColumn.implicitHeight + Style.space(30)
             radius: Style.cornerRadius
             color: Style.normalFillFor(root.foreground, Color.accent)
@@ -1023,6 +1030,8 @@ Panel {
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "REFRESH RATE"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
+                    id: refreshRateDropdown
+                    implicitWidth: Style.space(180)
                     width: parent.width
                     enabled: !!root.selectedDisplay && !root.applying
                     showLabel: false
@@ -1047,6 +1056,8 @@ Panel {
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "RESOLUTION"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
+                    id: resolutionDropdown
+                    implicitWidth: Style.space(180)
                     width: parent.width
                     enabled: !!root.selectedDisplay && !root.applying
                     showLabel: false
@@ -1076,7 +1087,10 @@ Panel {
           }
 
           BorderSurface {
-            width: parent.width - parent.spacing - (parent.width - parent.spacing) * 0.59
+            id: nightLightCard
+            implicitWidth: scheduleFromDropdown.implicitWidth + scheduleToDropdown.implicitWidth
+              + Style.space(10) + Style.space(30)
+            width: parent.width - parent.spacing - displaySettingsCard.width
             height: settingsColumn.implicitHeight + Style.space(30)
             radius: Style.cornerRadius
             color: Style.normalFillFor(root.foreground, Color.accent)
@@ -1145,6 +1159,8 @@ Panel {
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "FROM"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
+                    id: scheduleFromDropdown
+                    implicitWidth: Style.space(120)
                     width: parent.width
                     enabled: !root.applying
                     showLabel: false
@@ -1165,6 +1181,8 @@ Panel {
                   spacing: Style.space(5)
                   PanelSectionHeader { text: "TO"; foreground: root.foreground; fontFamily: root.fontFamily }
                   Dropdown {
+                    id: scheduleToDropdown
+                    implicitWidth: Style.space(120)
                     width: parent.width
                     enabled: !root.applying
                     showLabel: false
