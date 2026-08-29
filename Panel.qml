@@ -68,6 +68,8 @@ Panel {
   readonly property real layoutMaxX: layoutBound("maxX")
   readonly property real layoutMaxY: layoutBound("maxY")
   readonly property real physicalUnitScale: calculatePhysicalUnitScale()
+  readonly property real smallestPhysicalDiagonal: calculateSmallestPhysicalDiagonal()
+  readonly property real previewSizeExponent: 0.65
 
   function alpha(color, opacity) {
     return Qt.rgba(color.r, color.g, color.b, opacity)
@@ -185,6 +187,28 @@ Panel {
     return smallest > 0 ? smallest : 1
   }
 
+  function physicalDiagonal(display) {
+    var width = physicalWidth(display)
+    var height = physicalHeight(display)
+    return Math.sqrt(width * width + height * height)
+  }
+
+  function calculateSmallestPhysicalDiagonal() {
+    var smallest = 0
+    for (var i = 0; i < displays.length; i++) {
+      var display = displays[i]
+      if (!hasPhysicalSize(display)) continue
+      var diagonal = physicalDiagonal(display)
+      if (diagonal > 0 && (smallest === 0 || diagonal < smallest)) smallest = diagonal
+    }
+    return smallest
+  }
+
+  function previewPhysicalScale(display) {
+    if (!hasPhysicalSize(display) || smallestPhysicalDiagonal <= 0) return 1
+    return Math.pow(physicalDiagonal(display) / smallestPhysicalDiagonal, previewSizeExponent - 1)
+  }
+
   function visualX(display) {
     return Number(display.x) * physicalUnitScale
   }
@@ -194,11 +218,15 @@ Panel {
   }
 
   function visualWidth(display) {
-    return hasPhysicalSize(display) ? physicalWidth(display) : logicalWidth(display) * physicalUnitScale
+    return hasPhysicalSize(display)
+      ? physicalWidth(display) * previewPhysicalScale(display)
+      : logicalWidth(display) * physicalUnitScale
   }
 
   function visualHeight(display) {
-    return hasPhysicalSize(display) ? physicalHeight(display) : logicalHeight(display) * physicalUnitScale
+    return hasPhysicalSize(display)
+      ? physicalHeight(display) * previewPhysicalScale(display)
+      : logicalHeight(display) * physicalUnitScale
   }
 
   function layoutBound(kind) {

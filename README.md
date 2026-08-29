@@ -7,7 +7,7 @@ An Omarchy shell plugin for arranging displays and tuning per-monitor settings f
 ## Features
 
 - Select and drag the displays reported by Hyprland to arrange the desktop.
-- Represent monitors at their physical proportions when EDID dimensions are available.
+- Size monitor previews from EDID dimensions with gentle compression for a natural arrangement view.
 - Change per-display resolution, scale, and refresh rate using modes supported by the monitor.
 - Control brightness through Omarchy's internal-backlight, DDC/CI, and Apple display support.
 - Enable Night Light immediately or schedule it for a daily time range.
